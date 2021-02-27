@@ -1,0 +1,126 @@
+spark-shell --packages com.databricks:spark-xml_2.11:0.4.1
+
+def xml2DF (xml:String) = {
+     | val xRDD = sc.parallelize(Seq(xml))
+     | val df = new XmlReader().xmlRdd(spark.sqlContext,xRDD)
+     | val new_df = df.withColumn("comment",
+explode(df("Comments.Comment"))).select($"comment.Description",$"comment.Title")
+     | new_df.collectAsList}
+xml2DF: (xml: String)java.util.List[org.apache.spark.sql.Row]
+
+val xml3="<books><Comments><Comment><Title>Title3.1</Title><Description>Descript3.1</Description></Comment><Comment><Title>Title3333.1</Title><Description>Descript3333.1</Description></Comment></Comments></books>"
+
+scala> xml2DF(xml3)
+res18: java.util.List[org.apache.spark.sql.Row] =
+[[Descript3.1,Title3.1], [Descript3333.1,Title3333.1]]
+//xml2DF works as expected
+//-----------------------------------
+val rdd = sc.textFile("file:///home/spark/XML_Project/data.txt")
+val xml_pRDDs = rdd.map(x=>(x.split(',')(0).toInt, x.split(',')(3)))
+scala> xml_pRDDs.map(x=>(x._1,"call xml2DF "+x._2)).collect
+res17: Array[(Int, String)] = Array((1,call xml2DF
+<books><Comments><Comment><Title>Title1.1</Title><Description>Descript1.1</D..
+//-----------------------------------
+xml_pRDDs.map(x=>(x._1,xml2DF(x._2))).collect
+//This gives Nullpointerexception, I was expecting result as below
+//Array[(Int, java.util.List[org.apache.spark.sql.Row])] =
+Array((1,[[Descript3.1,Title3.1], [Descript3333.1,Title3333.1]]),....
+====================
+Below is content of data.txt file.
+1,Amol,Kolhapur,<books><Comments><Comment><Title>Title1.1</Title><Description>Descript1.1</Description></Comment><Comment><Title>Title1.2</Title><Description>Descript1.2</Description></Comment><Comment><Title>Title1.3</Title><Description>Descript1.3</Description></Comment></Comments></books>
+2,Ameet,Bangalore,<books><Comments><Comment><Title>Title2.1</Title><Description>Descript2.1</Description></Comment><Comment><Title>Title2.2</Title><Description>Descript2.2</Description></Comment></Comments></books>
+3,Rajesh,Jaipur,<books><Comments><Comment><Title>Title3.1</Title><Description>Descript3.1</Description></Comment><Comment><Title>Title3.2</Title><Description>Descript3.2</Description></Comment><Comment><Title>Title3.3</Title><Description>Descript3.3</Description></Comment><Comment><Title>Title3.4</Title><Description>Descript3.4</Description></Comment></Comments></books>
+
+scala>val rdd  =
+> sc.parallelize(Seq("""<books><Comments><Comment><Title>Title1.1</Title><Description>Description_1.1</Description></Comment>
+> <Comment><Title>Title1.2</Title><Description>Description_1.2</Description></Comment>
+> <Comment><Title>Title1.3</Title><Description>Description_1.3</Description></Comment>
+> </Comments></books>"""))
+> rdd: org.apache.spark.rdd.RDD[String] = ParallelCollectionRDD[0] at
+> parallelize at <console>:24
+>
+> scala>import com.databricks.spark.xml.XmlReader
+>
+> scala>val df = new XmlReader().xmlRdd(spark.sqlContext, rdd)
+> df: org.apache.spark.sql.DataFrame = [Comments: struct<Comment:
+> array<struct<Description:string,Title:string>>>]
+>
+> scala>df.printSchema
+> root
+>  |-- Comments: struct (nullable = true)
+>  |    |-- Comment: array (nullable = true)
+>  |    |    |-- element: struct (containsNull = true)
+>  |    |    |    |-- Description: string (nullable = true)
+>  |    |    |    |-- Title: string (nullable = true)
+>
+> scala>df.show(false)
+> +--------------------------------------------------------------------------------------------------+
+> |Comments
+>                       |
+> +--------------------------------------------------------------------------------------------------+
+> |[WrappedArray([Description_1.1,Title1.1], [Description_1.2,Title1.2],
+> [Description_1.3,Title1.3])]|
+> +--------------------------------------------------------------------------------------------------+
+>
+>
+> scala>df.withColumn("comment",
+> explode(df("Comments.Comment"))).select($"comment.Description",
+> $"comment.Title").show
+> +---------------+--------+
+> |    Description|   Title|
+> +---------------+--------+
+> |Description_1.1|Title1.1|
+> |Description_1.2|Title1.2|
+> |Description_1.3|Title1.3|
+> +---------------+--------+
+
+
+But when I tried I see load() doesn’t like to read from xmlcomment column on
+> oracle_data.
+>
+>
+>
+> scala> val xmlDF = sqlContext.sql("SELECT * FROM oracle_data")
+>
+> 17/06/29 18:31:58 INFO parse.ParseDriver: Parsing command: SELECT * FROM
+> oracle_data
+>
+> 17/06/29 18:31:58 INFO parse.ParseDriver: Parse Completed
+>
+> …
+>
+> scala> val xmlDF_flattened =
+> xmlDF.withColumn("xmlcomment",explode(sqlContext.read.format("com.databricks.spark.xml").option("rowTag","book").load($"xmlcomment")))
+>
+> <console>:22: error: overloaded method value load with alternatives:
+>
+>   ()org.apache.spark.sql.DataFrame <and>
+>
+>   (path: String)org.apache.spark.sql.DataFrame
+>
+> cannot be applied to (org.apache.spark.sql.ColumnName)
+>
+>        val xmlDF_flattened =
+> xmlDF.withColumn("xmlcomment",explode(sqlContext.read.format("com.databricks.spark.xml").option("rowTag","book").load($"xmlcomment")))
+>
+>
+I am able to parse single XML using below approach in spark-shell using
+> example below but how do we apply the same recursively for all rows ?
+>
+> https://community.hortonworks.com/questions/71538/parsing-xml-in-spark-rdd.html.
+>
+> val dfX =
+> sqlContext.read.format("com.databricks.spark.xml").option("rowTag","book").load("books.xml")
+>
+>
+> val xData = dfX.registerTempTable("books")
+>
+>
+> dfX.printSchema()
+>
+>
+> val books_inexp =sqlContext.sql("select title,author from books where
+> price<10")
+>
+>
+> books_inexp.show
